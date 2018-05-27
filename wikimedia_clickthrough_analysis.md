@@ -1,11 +1,3 @@
----
-title: "Wikimedia Clickthrough Analysis"
-author: "Jim Neville"
-date: "May 26, 2018"
-output: 
-  html_document: 
-    keep_md: yes
----
 
 ## Executive Summary
 
