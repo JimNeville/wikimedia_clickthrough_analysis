@@ -1,0 +1,268 @@
+---
+title: "Wikimedia Clickthrough Analysis"
+author: "Jim Neville"
+date: "May 26, 2018"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+## Executive Summary
+
+The event logs contained in `events_log.csv` include data regarding Wikimedia Searches from 3/1/16 through 3/8/16. The data suggest that the treatment in Group A tends to coincide with a greater average clickthrough rate, as well as a longer average session length. Additionally, it appears that the differences between the  Group A and Group B treatments had no significant effect on the zero results rate.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Load required packages and read in dataset
+library(tidyverse)
+library(knitr)
+
+df <- data.table::fread('events_log.csv')
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# convert variable datatypes
+df <- df %>% mutate_at(.vars = c('session_id', 'group', 'action'), .funs = as.factor)
+df$timestamp <- lubridate::ymd_hms(df$timestamp)
+df$date <- lubridate::as_date(df$timestamp)
+df$date <- as.factor(df$date)
+```
+
+
+### Daily Overall Clickthrough Rate
+
+The overall clickthrough rate remained steady over this period. The minimum clickthrough rate (24.31%) was recorded on 3/2/18, while the maximum clickthrough rate (25.75%) was recorded on 3/4/18. 
+
+```{r echo=FALSE}
+# Create clickthrough rate dataframe
+searches <- df %>% 
+  filter(action == 'searchResultPage') %>% 
+  group_by(date) %>% 
+  summarise(searches = n())
+
+clickthroughs <- df %>% 
+  filter(action == 'visitPage' & !is.na(result_position)) %>% 
+  group_by(date) %>% 
+  summarise(clickthroughs = n())
+
+clickthrough_rate <- searches %>% 
+  left_join(clickthroughs, by = 'date') %>% 
+  mutate(clickthrough_rate = clickthroughs/searches)
+```
+
+
+```{r echo=FALSE}
+# Plot Daily clickthrough rate
+vis_theme <- ggthemes::theme_tufte(ticks=F)
+
+clickthrough_rate %>% ggplot() +
+  geom_line(aes(as.factor(date), clickthrough_rate, group=1, color = "red"), size = 1.5) +
+  geom_point(aes(as.factor(date), clickthrough_rate, group=1, color = "red"), size = 2.2) +
+  vis_theme +
+  labs(title = 'Daily Overall Clickthrough Rate', x = 'Date', y = 'Clickthrough Rate') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0,0.3)) 
+```
+
+
+### Daily Clickthrough Rate - AB Test
+
+Over this period, it is clear that the Group A treatment led to a much greater clickthrough rate compared with the Group B treatment. The Group A treatment had a maximum clickthrough rate of 30.62% and a minimum clickthrough rate of 28.43%, while the Group B treatment had a maximum clickthrough rate of 17.64% and a minimum clickthrough rate of 12.05%. Moreover, a paired t-test revealed a statistically significant difference between the two treatment groups (t = 15.41, p < 0.01).
+
+```{r echo=FALSE}
+# Create clickthrough rate AB test dataframe
+searches_ab <- df %>%
+  filter(action == 'searchResultPage') %>% 
+  group_by(date, group) %>% 
+  summarise(searches = n())
+
+clickthroughs_ab <- df %>% 
+  filter(action == 'visitPage'& !is.na(result_position)) %>% 
+  group_by(date, group) %>% 
+  summarise(clickthroughs = n())
+
+clickthrough_rate_ab <- clickthroughs_ab %>% 
+  left_join(searches_ab, by = c('date', 'group')) %>% 
+  mutate(clickthrough_rate = clickthroughs/searches)
+```
+
+
+```{r echo=FALSE}
+# Plot daily clickthrough rate - AB test
+tmp <- clickthrough_rate_ab
+names(tmp)[2] <- "Group"
+tmp <- tmp %>% mutate(Group = case_when(Group == "a" ~ "A", 
+                                        Group == "b" ~ "B"))
+
+tmp %>%
+  ggplot() +
+  geom_line(aes(as.factor(date), clickthrough_rate, group = Group, color = Group), size = 1.5) +
+  geom_point(aes(as.factor(date), clickthrough_rate, group = Group, color = Group), size = 2.2) +
+  vis_theme +
+  labs(title = 'Daily Clickthrough Rate - AB Test', x = 'Date', y = 'Clickthrough Rate') +
+  theme(legend.position = 'top', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0,0.4))
+```
+
+
+```{r echo=FALSE}
+# Create dataframe for t test and run t test
+ctr_a_tmp <- clickthrough_rate_ab %>% filter(group == "a") %>% mutate(ctr_grp_a = clickthrough_rate)
+ctr_b_tmp <- clickthrough_rate_ab %>% filter(group == "b") %>% mutate(ctr_grp_b = clickthrough_rate)
+ctr_t_test <- ctr_a_tmp %>% left_join(ctr_b_tmp, by = "date")
+
+ctr_ab_t_test <- t.test(ctr_t_test$ctr_grp_a, ctr_t_test$ctr_grp_b, alternative = "greater", paired = TRUE, conf.level = 0.99)
+
+broom::tidy(ctr_ab_t_test)
+```
+
+
+### Results Users Try First
+
+Overall, the majority of all searches (53%) result in the user visiting the webpage listed first in the search results, with the liklihood that the user will click on the result decreasing as the result positiion moves farther away from 1. 
+
+```{r echo=FALSE}
+# Plot result positions clicked most frequently
+visit_vis <- df %>% filter(action == 'visitPage' & !is.na(result_position) & result_position < 11) %>% 
+  ggplot(aes(as.factor(result_position), fill = 'red')) + 
+  geom_bar()
+
+visit_vis +
+  vis_theme +
+  labs(title = 'Result Positions Clicked Most Frequently', x = 'Result Position', y = 'Frequency') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(labels = scales::comma,limits = c(0, 25000))
+```
+
+This trend remained steady over the 8-day period from 3/1/16 to 3/8/16.
+
+```{r echo=FALSE}
+# Plot result positions clicked most frequently by date
+visit_vis +
+  facet_wrap(~ date) +
+  vis_theme +
+  labs(title = 'Result Positions Clicked Most Frequetly by Date', x = 'Result Position', y = 'Frequency') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(labels = scales::comma,limits = c(0, 3500))
+```
+
+### Daily Overall Zero Results Rate
+
+The Daily Overall Zero Results Rate remained faily steady over this time period, with the maximum Zero Results Rate (24.03%) occuring on 3/8/18 and the minimum Zero Results Rate (21.38%) occuring on 3/6/18.
+
+```{r echo=FALSE}
+# Create zero results rate dataframe
+search_nr <- df %>% 
+  filter(action == 'searchResultPage' & n_results == 0) %>% 
+  group_by(date) %>% summarise(no_results = n())
+
+search_r <- df %>% 
+  filter(action == 'searchResultPage' & n_results > 0) %>% 
+  group_by(date) %>% summarise(results = n())
+
+daily_zero_results_rate <- search_nr %>% 
+  left_join(search_r, by = "date") %>% 
+  mutate(zero_results_rate = no_results/results)
+```
+
+
+```{r echo=FALSE}
+# Plot daily zero results rate
+daily_zero_results_rate %>% 
+  ggplot(aes(as.factor(date), zero_results_rate, color = "red")) +
+  geom_line(group = 1, size = 1.5) +
+  geom_point(group = 1, size = 2.2) +
+  vis_theme +
+  labs(title = 'Daily Overall Zero Results Rate', x = 'Date', y = 'Zero Results Rate') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0, 0.25))
+```
+
+### Daily Zero Results Rate - AB Test
+
+The Daily Zero Results Rate does not appear to vary a great deal between the group treatments. Moreover a one-tailed paired t-test revealed that there is not a statistically significant difference between the Zero Results Rate for the two treatment groups (t = -0.86, p = 0.21) 
+
+```{r echo=FALSE}
+# Create daily zero results rate AB test dataframe
+search_nr_ab <- df %>% 
+  filter(action == 'searchResultPage' & n_results == 0) %>% 
+  group_by(date, group) %>% 
+  summarise(no_results = n())
+
+search_r_ab <- df %>% 
+  filter(action == 'searchResultPage' & n_results > 0) %>% 
+  group_by(date, group) %>% 
+  summarise(results = n())
+
+daily_zero_results_rate_ab <- search_nr_ab %>% 
+  left_join(search_r_ab, by = c("date", "group")) %>% 
+  mutate(zero_results_rate = no_results/results)
+```
+
+
+```{r echo=FALSE}
+# Plot daily zero results rate ab test
+tmp <- daily_zero_results_rate_ab
+names(tmp)[2] <- "Group"
+tmp <- tmp %>% mutate(Group = case_when(Group == "a" ~ "A",
+                                        Group == "b" ~ "B"))
+
+tmp %>% 
+  ggplot(aes(as.factor(date), zero_results_rate, group = Group, color = Group)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 2.2) +
+  vis_theme +
+  labs(title = 'Daily Zero Results Rate - AB Test', x = 'Date', y = 'Zero Results Rate') +
+  theme(legend.position = 'top', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0,0.3))
+```
+
+
+```{r echo=FALSE}
+# Create dataframe for t test and run t test
+zrr_a_tmp <- daily_zero_results_rate_ab %>% filter(group == "a") %>% mutate(zrr_grp_a = zero_results_rate)
+zrr_b_tmp <- daily_zero_results_rate_ab %>% filter(group == "b") %>% mutate(zrr_grp_b = zero_results_rate)
+zrr_t_test <- zrr_a_tmp %>% left_join(zrr_b_tmp, by = "date")
+
+zrr_ab_t_test <- t.test(zrr_t_test$zrr_grp_a, zrr_t_test$zrr_grp_b, alternative = "less", paired = TRUE, conf.level = 0.95)
+
+broom::tidy(zrr_ab_t_test)
+```
+
+### Session Length
+
+The searches in the Group A treatment had a mean session length of 102 seconds, while the Group B treatment's mean was much less at 29.1 seconds.
+
+```{r echo=FALSE}
+## Create session length dataframe
+session_length <- df %>% 
+  replace_na(replace = list(checkin = 0)) %>% 
+  group_by(session_id) %>%
+  summarise(session_length = max(checkin) - min(checkin))
+
+df$group <- as.character(df$group)
+
+group_by_session <- df %>% 
+  group_by(session_id) %>% 
+  summarise(group = max(group))
+
+session_length_group_cor <- group_by_session %>% 
+  left_join(session_length, by = "session_id")
+
+session_length_group_cor <- session_length_group_cor %>% 
+  group_by(group) %>% summarise(mean_sl = mean(session_length))
+```
+
+
+```{r echo=FALSE}
+# Plot average session length by group
+ggplot(session_length_group_cor, aes(group, mean_sl, group = group, color = "red")) +
+  geom_line(group = 1, size = 1.5) +
+  geom_point(group = 1, size = 2.2) +
+  vis_theme +
+  labs(title = 'Average Session Length by Group', x = 'Group', y = 'Average Session Length (in seconds)') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0,120)) +
+  scale_x_discrete(labels = c("A", "B"))
+```
+
