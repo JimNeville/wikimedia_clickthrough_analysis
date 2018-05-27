@@ -1,5 +1,5 @@
 # Wikimedia Clickthrough Analysis
-Author: Jim Neville
+Author: Jim Neville    
 Date: 5/20/18
 
 
